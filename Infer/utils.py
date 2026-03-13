@@ -9,8 +9,8 @@ import json
 with open("config.json") as f:
     cfg = json.load(f)
 
-BATCH_SIZE = cfg['inference']['batch_size']
-DET_CONCURRENCY = cfg['inference'].get('detection_concurrency', 32)
+BATCH_SIZE = cfg['inference'].get('video_batch_size', cfg['inference']['batch_size'])
+DET_CONCURRENCY = cfg['inference'].get('video_detection_concurrency', cfg['inference'].get('detection_concurrency', 4))
 MAX_WIDTH = cfg['video']['max_width']
 ALIGN_3D = cfg['inference'].get('align_3d', False)
 

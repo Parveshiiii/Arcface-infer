@@ -46,8 +46,19 @@ async def load_video(source: str, session: aiohttp.ClientSession = None):
                                 print(f"HTTP {resp.status} for {source}")
                                 return None
 
+                            # Sanity Check: Ensure it's actually a video and not an HTML error page
+                            ctype = resp.headers.get('Content-Type', '').lower()
+                            if 'video' not in ctype and 'application/octet-stream' not in ctype:
+                                print(f"Invalid content type {ctype} for {source}")
+                                return None
+
                             content = await resp.read()
                             
+                            # Sanity Check: If it's less than 10KB, it's likely a corrupted file or error page
+                            if len(content) < 10240:
+                                print(f"Video file too small ({len(content)} bytes) for {source}")
+                                return None
+
                             # Run file writing in thread pool to avoid blocking async event loop
                             loop = asyncio.get_running_loop()
                             def write_video():

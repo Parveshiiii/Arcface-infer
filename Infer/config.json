@@ -32,8 +32,10 @@
         "root": "./model"
     },
     "inference": {
-        "batch_size": 32,
-        "detection_concurrency": 32,
+        "batch_size": 128,
+        "detection_concurrency": 128,
+        "video_batch_size": 16,
+        "video_detection_concurrency": 16,
         "align_3d": true
     },
     "video": {
