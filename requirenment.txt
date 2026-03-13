@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+gunicorn
+git+https://github.com/Parveshiiii/Insighface-updated.git
+onnxruntime-gpu
+onnx
+opencv-python-headless
+numpy
+pillow
+aiohttp
+python-dotenv
+pydantic

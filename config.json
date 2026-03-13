@@ -1,0 +1,50 @@
+{
+    "model": {
+        "name": "antelopev2",
+        "det_size": [
+            640,
+            640
+        ],
+        "providers": [
+            "TensorrtExecutionProvider",
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider"
+        ],
+        "provider_options": {
+            "TensorrtExecutionProvider": {
+                "device_id": 0,
+                "trt_max_workspace_size": 2147483648,
+                "trt_fp16_enable": true,
+                "trt_engine_cache_enable": true,
+                "trt_engine_cache_path": "./model/trt_cache"
+            },
+            "CUDAExecutionProvider": {
+                "device_id": 0,
+                "cudnn_conv_algo_search": "DEFAULT",
+                "gpu_mem_limit": 21474836480
+            }
+        },
+        "allowed_modules": [
+            "detection",
+            "landmark_3d_68",
+            "recognition"
+        ],
+        "root": "./model"
+    },
+    "inference": {
+        "batch_size": 32,
+        "detection_concurrency": 32,
+        "align_3d": true
+    },
+    "video": {
+        "max_width": 1280,
+        "frames_per_second": 1
+    },
+    "network": {
+        "http_connection_limit": 100,
+        "image_timeout_sec": 10,
+        "video_timeout_sec": 60,
+        "max_retries": 4,
+        "initial_wait_sec": 1
+    }
+}
