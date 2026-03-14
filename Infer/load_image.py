@@ -7,9 +7,11 @@ from io import BytesIO
 from PIL import Image
 
 #config
-import json
-with open("config.json") as f:
-    cfg = json.load(f)
+import simdjson
+
+parser = simdjson.Parser()
+with open("config.json", "rb") as f:   # open in binary mode
+    cfg = parser.parse(f.read())       # parse entire file
 
 MAX_RETRIES = cfg['network']['max_retries']
 INITIAL_WAIT = cfg['network']['initial_wait_sec']

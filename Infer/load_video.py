@@ -6,10 +6,13 @@ import asyncio
 import os
 import tempfile
 import uuid
+import simdjson
 
-import json
-with open("config.json") as f:
-    cfg = json.load(f)
+parser = simdjson.Parser()
+
+with open("config.json", "rb") as f:   # open in binary mode
+    cfg = parser.parse(f.read())       # parse entire file
+
 
 MAX_RETRIES = cfg['network']['max_retries']
 INITIAL_WAIT = cfg['network']['initial_wait_sec']

@@ -5,9 +5,11 @@ import os
 import asyncio
 from load_video import load_video
 
-import json
-with open("config.json") as f:
-    cfg = json.load(f)
+import simdjson
+
+parser = simdjson.Parser()
+with open("config.json", "rb") as f:   # open in binary mode
+    cfg = parser.parse(f.read())       # parse entire file
 
 BATCH_SIZE = cfg['inference'].get('video_batch_size', cfg['inference']['batch_size'])
 DET_CONCURRENCY = cfg['inference'].get('video_detection_concurrency', cfg['inference'].get('detection_concurrency', 4))

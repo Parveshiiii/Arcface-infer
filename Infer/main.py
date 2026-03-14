@@ -7,37 +7,53 @@ BY me
 - GPU processing is fully concurrent via ONNX Runtime native thread-safety + batching(use the updated pakage updated by me).
 - Image parsing utilizes aiohttp.
 """
-
+import os
+import time
+import uuid
 import asyncio
 import aiohttp
+import aiofiles
+import orjson
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from insightface.app import FaceAnalysis
 import numpy as np
 import uvicorn
 from load_image import load_image
 from utils import analyze_video
-
 # ── Config ──
-import json
-with open("config.json") as f:
-    cfg = json.load(f)
+import simdjson
+
+os.makedirs("./embedding/images", exist_ok=True)
+os.makedirs("./embedding/videos", exist_ok=True)
+
+parser = simdjson.Parser()
+
+with open("config.json", "rb") as f:   # open in binary mode
+    cfg = parser.parse(f.read())       # parse entire file
+
 
 BATCH_SIZE      = cfg['inference']['batch_size']
 DET_CONCURRENCY = cfg['inference'].get('detection_concurrency', 32)
 ALIGN_3D        = cfg['inference'].get('align_3d', False)   # optional — default OFF
 NAME            = cfg["model"]["name"]
-PROVIDERS       = cfg["model"]["providers"]
-DET_SIZE        = cfg["model"]["det_size"]
+PROVIDERS       = list(cfg["model"]["providers"])          # simdjson returns its own Array type;
+DET_SIZE        = list(cfg["model"]["det_size"])           # ONNX Runtime requires a real Python list
 HTTP_CONNECTION_LIMIT = cfg["network"]["http_connection_limit"]
 FPS             = cfg["video"]["frames_per_second"]
 ROOT            = cfg["model"]["root"]
-PROVIDER_OPTIONS = cfg["model"].get("provider_options", None)
+
+# ── Fix: ONNX Runtime requires provider_options to be a list if providers is a list ──
+RAW_OPTS = cfg["model"].get("provider_options", {})
+PROVIDER_OPTIONS = [
+    dict(RAW_OPTS.get(p, {})) for p in PROVIDERS
+]
 
 # Only load landmark_3d_68 if 3D alignment is enabled
 ALLOWED_MODULES = [
-    m for m in cfg["model"]["allowed_modules"]
+    m for m in list(cfg["model"]["allowed_modules"])   # cast simdjson Array → list
     if m != "landmark_3d_68" or ALIGN_3D
 ]
 
@@ -203,7 +219,7 @@ async def generate_master(data: MasterSchema):
 # ENDPOINT 2: Generate Embeddings (all faces)
 # ══════════════════════════════════════════════════════════════
 @app.post("/api/v1/generate")
-async def generate_embeddings(data: MasterSchema):
+async def generate_embeddings(request: Request, data: MasterSchema):
     if data.task != "GenerateEmbedding":
         raise HTTPException(status_code=400, detail="Invalid action specified")
     sources = (data.path or []) + data.urls
@@ -326,13 +342,30 @@ async def generate_embeddings(data: MasterSchema):
     
     await gpu_queue.put(None)
     await gpu_task
+    payload = {"status": "success", "results": results, "total_faces": total_faces}
+    filename = f"{int(time.time())}_{uuid.uuid4()}.jsonl"
+    filepath = os.path.join("./embedding/images", filename)
 
-    return {"status": "success", "results": results, "total_faces": total_faces}
+    # Non-blocking write — aiofiles releases the event loop so other
+    # requests are never stalled while data is flushed to disk.
+    async with aiofiles.open(filepath, "wb") as f:
+        await f.write(orjson.dumps(payload))
+        await f.write(b"\n")  # newline at the end
+
+    base_url = str(request.base_url).rstrip("/")
+    download_url = f"{base_url}/api/v1/embeddings/images/{filename}"
+
+    return {
+        "status": "success",
+        "file_name": filename,
+        "download_url": download_url,   # permanent link — valid until file is deleted
+        "total_faces": total_faces
+    }
 
 # NOTE: the embeddings are pre normalized so the cosine sim is only np.dotproduct(a,b)
 
 @app.post("/api/v1/analyze_video")
-async def video_endpoint(data: VideoSchema):
+async def video_endpoint(request: Request, data: VideoSchema):
     if data.task != "VideoAnalysis":
         raise HTTPException(status_code=400, detail="Invalid action")
     
@@ -355,10 +388,10 @@ async def video_endpoint(data: VideoSchema):
         )
     
     try:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
         final_results = []
-        for i, res in enumerate(results):
+        for i, res in enumerate(raw_results):
             if isinstance(res, Exception):
                 final_results.append({
                     "source": sources[i],
@@ -369,10 +402,71 @@ async def video_endpoint(data: VideoSchema):
             else:
                 final_results.append(res)
 
-        return {"status": "success", "results": final_results}
+        payload = {"status": "success", "results": final_results}
+        filename = f"{int(time.time())}_{uuid.uuid4()}.jsonl"
+        filepath = os.path.join("./embedding/videos", filename)
 
+        # Non-blocking write — keeps the event loop free for other requests.
+        async with aiofiles.open(filepath, "wb") as f:
+            await f.write(orjson.dumps(payload))
+            await f.write(b"\n")  # newline at the end
+
+        base_url = str(request.base_url).rstrip("/")
+        download_url = f"{base_url}/api/v1/embeddings/videos/{filename}"
+
+        return {
+            "status": "success",
+            "file_name": filename,
+            "download_url": download_url,   # permanent link — valid until file is deleted
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════
+# ENDPOINT: Download embedding file
+# ══════════════════════════════════════════════════════════════
+@app.get("/api/v1/embeddings/{embed_type}/{filename}")
+async def download_embedding(embed_type: str, filename: str):
+    """
+    Serve a saved embedding file for download.
+    The URL is permanent — it is valid as long as the file exists on disk.
+    DELETE the file to invalidate the link (returns 404 automatically).
+
+    embed_type : 'images' | 'videos'
+    filename   : the file_name value returned by /generate or /analyze_video
+    """
+    # ── Validate embed_type ──
+    if embed_type not in ("images", "videos"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid embed_type. Must be 'images' or 'videos'."
+        )
+
+    # ── Path-traversal guard ──
+    # Reject any filename that tries to escape the embedding directory.
+    # e.g. filename='../../config.json' would leak sensitive files without this.
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    filepath = os.path.join(f"./embedding/{embed_type}", filename)
+
+    # ── Check file exists ──
+    if not os.path.isfile(filepath):
+        raise HTTPException(
+            status_code=404,
+            detail=f"File '{filename}' not found. It may have been deleted."
+        )
+
+    # ── Stream file to client ──
+    # FileResponse streams in chunks — the full file is never loaded into RAM.
+    # Content-Disposition: attachment forces a download dialog in browsers.
+    return FileResponse(
+        path=filepath,
+        media_type="application/x-ndjson",
+        filename=filename,
+        headers={"Cache-Control": "no-store"},  # don't let proxies cache embedding data
+    )
 
 
 if __name__ == "__main__":
