@@ -1,12 +1,15 @@
 fastapi
 uvicorn
-gunicorn
-git+https://github.com/Parveshiiii/Insighface-updated.git
-onnxruntime-gpu
-onnx
-opencv-python-headless
+aiohttp
+aiofiles
+orjson
+simdjson
 numpy
 pillow
-aiohttp
-python-dotenv
+opencv-python-headless
 pydantic
+python-dotenv
+onnx
+onnxruntime-gpu
+# Insightface fork (optimized for batching/concurrency)
+git+https://github.com/Parveshiiii/Insighface-updated.git
