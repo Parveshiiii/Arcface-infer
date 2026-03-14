@@ -7,7 +7,6 @@ onnx
 opencv-python-headless
 numpy
 pillow
-pysimdjson
 aiohttp
 python-dotenv
 pydantic

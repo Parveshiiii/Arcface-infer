@@ -44,6 +44,8 @@ DET_SIZE        = list(cfg["model"]["det_size"])           # ONNX Runtime requir
 HTTP_CONNECTION_LIMIT = cfg["network"]["http_connection_limit"]
 FPS             = cfg["video"]["frames_per_second"]
 ROOT            = cfg["model"]["root"]
+DOWNLOAD_CONCURRENCY = cfg["network"].get("download_concurrency", 32)
+VIDEO_CONCURRENCY = cfg["inference"].get("video_concurrency", 1)
 
 # ── Fix: ONNX Runtime requires provider_options to be a list if providers is a list ──
 RAW_OPTS = cfg["model"].get("provider_options", {})
@@ -71,10 +73,18 @@ http_session = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_session
+    global http_session, download_semaphore, video_semaphore
     # Increase limits for high concurrency
     connector = aiohttp.TCPConnector(limit=HTTP_CONNECTION_LIMIT)
     http_session = aiohttp.ClientSession(connector=connector)
+    
+    # ── Throttling ──
+    # Limit number of SIMULTANEOUS downloads to prevent RAM spike
+    # Even if 10k links come in, only DOWNLOAD_CONCURRENCY will be downloading at once
+    download_semaphore = asyncio.Semaphore(DOWNLOAD_CONCURRENCY) 
+    
+    # Limit number of SIMULTANEOUS video analyses (very heavy on GPU)
+    video_semaphore = asyncio.Semaphore(VIDEO_CONCURRENCY) 
     yield
     await http_session.close()
 
@@ -101,7 +111,8 @@ class VideoSchema(BaseModel):
 
 async def producer_task(index: int, source: str, post_id: str, q: asyncio.Queue):
     """Downloads an image and instantly pushes it into the queue with its metadata."""
-    img = await load_image(source, session=http_session)
+    async with download_semaphore:
+        img = await load_image(source, session=http_session)
     await q.put((index, source, post_id, img))
 
 # ══════════════════════════════════════════════════════════════
@@ -376,15 +387,19 @@ async def video_endpoint(request: Request, data: VideoSchema):
     n_sources = len(sources)
     post_ids = (data.post_ids or []) + [None] * (n_sources - len(data.post_ids or []))
     
+    async def throttled_video_analysis(source, post_id, fps):
+        async with video_semaphore:
+            return await analyze_video(
+                video_source=source,
+                face_app=face_app,
+                frames_per_second=fps,
+                post_id=post_id
+            )
+
     tasks = []
     for i in range(n_sources):
         tasks.append(
-            analyze_video(
-                video_source=sources[i],
-                face_app=face_app,
-                frames_per_second=data.fps,
-                post_id=post_ids[i]
-            )
+            throttled_video_analysis(sources[i], post_ids[i], data.fps)
         )
     
     try:

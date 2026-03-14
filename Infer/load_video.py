@@ -55,23 +55,20 @@ async def load_video(source: str, session: aiohttp.ClientSession = None):
                                 print(f"Invalid content type {ctype} for {source}")
                                 return None
 
-                            content = await resp.read()
+                            tmp_path = os.path.join(tempfile.gettempdir(), f"vid_{uuid.uuid4().hex}.mp4")
                             
+                            # Stream the video directly to disk in chunks to save RAM
+                            with open(tmp_path, "wb") as f:
+                                async for chunk in resp.content.iter_chunked(256 * 1024): # 256KB chunks
+                                    f.write(chunk)
+
                             # Sanity Check: If it's less than 10KB, it's likely a corrupted file or error page
-                            if len(content) < 10240:
-                                print(f"Video file too small ({len(content)} bytes) for {source}")
+                            if os.path.getsize(tmp_path) < 10240:
+                                print(f"Video file too small ({os.path.getsize(tmp_path)} bytes) for {source}")
+                                if os.path.exists(tmp_path): os.remove(tmp_path)
                                 return None
 
-                            # Run file writing in thread pool to avoid blocking async event loop
-                            loop = asyncio.get_running_loop()
-                            def write_video():
-                                tmp_path = os.path.join(tempfile.gettempdir(), f"vid_{uuid.uuid4().hex}.mp4")
-                                with open(tmp_path, "wb") as f:
-                                    f.write(content)
-                                return tmp_path
-                                
-                            video_path = await loop.run_in_executor(None, write_video)
-                            return video_path
+                            return tmp_path
 
                     except (asyncio.TimeoutError, aiohttp.ClientError):
                         # network error — exponential backoff and retry

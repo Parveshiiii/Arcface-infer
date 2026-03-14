@@ -34,8 +34,9 @@
     "inference": {
         "batch_size": 128,
         "detection_concurrency": 128,
-        "video_batch_size": 16,
-        "video_detection_concurrency": 16,
+        "video_batch_size": 32,
+        "video_detection_concurrency": 32,
+        "video_concurrency": 1,
         "align_3d": true
     },
     "video": {
@@ -44,6 +45,7 @@
     },
     "network": {
         "http_connection_limit": 100,
+        "download_concurrency": 32,
         "image_timeout_sec": 10,
         "video_timeout_sec": 60,
         "max_retries": 4,
