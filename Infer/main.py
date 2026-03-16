@@ -15,7 +15,8 @@ import aiohttp
 import aiofiles
 import orjson
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from insightface.app import FaceAnalysis
@@ -44,6 +45,16 @@ DET_SIZE        = list(cfg["model"]["det_size"])           # ONNX Runtime requir
 HTTP_CONNECTION_LIMIT = cfg["network"]["http_connection_limit"]
 FPS             = cfg["video"]["frames_per_second"]
 ROOT            = cfg["model"]["root"]
+
+# ── Security ──
+SECURITY_CFG    = cfg.get("security", {})
+AUTH_TOKEN      = SECURITY_CFG.get("auth_token") if SECURITY_CFG else None
+api_key_header  = APIKeyHeader(name="X-Auth-Token", auto_error=False)
+
+async def verify_token(api_key: str = Security(api_key_header)):
+    if AUTH_TOKEN and api_key != AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing Auth Token")
+    return api_key
 
 # ── Fix: ONNX Runtime requires provider_options to be a list if providers is a list ──
 RAW_OPTS = cfg["model"].get("provider_options", {})
@@ -107,7 +118,7 @@ async def producer_task(index: int, source: str, post_id: str, q: asyncio.Queue)
 # ══════════════════════════════════════════════════════════════
 # ENDPOINT 1: Master Embedding
 # ══════════════════════════════════════════════════════════════
-@app.post("/api/v1/gen_master")
+@app.post("/api/v1/gen_master", dependencies=[Depends(verify_token)])
 async def generate_master(data: MasterSchema):
     if data.task != "GenerateEmbedding":
         raise HTTPException(status_code=400, detail="Invalid action specified")
@@ -218,7 +229,7 @@ async def generate_master(data: MasterSchema):
 # ══════════════════════════════════════════════════════════════
 # ENDPOINT 2: Generate Embeddings (all faces)
 # ══════════════════════════════════════════════════════════════
-@app.post("/api/v1/generate")
+@app.post("/api/v1/generate", dependencies=[Depends(verify_token)])
 async def generate_embeddings(request: Request, data: MasterSchema):
     if data.task != "GenerateEmbedding":
         raise HTTPException(status_code=400, detail="Invalid action specified")
@@ -364,7 +375,7 @@ async def generate_embeddings(request: Request, data: MasterSchema):
 
 # NOTE: the embeddings are pre normalized so the cosine sim is only np.dotproduct(a,b)
 
-@app.post("/api/v1/analyze_video")
+@app.post("/api/v1/analyze_video", dependencies=[Depends(verify_token)])
 async def video_endpoint(request: Request, data: VideoSchema):
     if data.task != "VideoAnalysis":
         raise HTTPException(status_code=400, detail="Invalid action")

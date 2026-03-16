@@ -48,5 +48,8 @@
         "video_timeout_sec": 60,
         "max_retries": 4,
         "initial_wait_sec": 1
+    },
+    "security": {
+        "auth_token": "YOUR_PREGENERATED_TOKEN_HERE"
     }
 }
