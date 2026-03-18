@@ -50,6 +50,6 @@
         "initial_wait_sec": 1
     },
     "security": {
-        "auth_token": "YOUR_PREGENERATED_TOKEN_HERE"
+        "auth_token": ""
     }
 }
