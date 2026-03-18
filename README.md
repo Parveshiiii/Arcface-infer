@@ -7,12 +7,6 @@ This document outlines the API endpoints available in the inference server and t
 
 ## 🚀 API Endpoints
 
-### 🔐 Authentication
-All processing endpoints require an authentication token passed in the `X-Auth-Token` header. You can configure this token in `config.json` under the `security` section.
-
-**Header Example:**
-`X-Auth-Token: YOUR_PREGENERATED_TOKEN_HERE`
-
 ---
 ### 1. Generate Master Embedding
 **Endpoint:** `POST /api/v1/gen_master`  
